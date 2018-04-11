@@ -118,7 +118,7 @@ public class PoorMansIocContextTest {
         assertTrue(petByType2 instanceof Dog);
 
         Pet petByName2 = poorMansIocContext.getBeanByName("myPet");
-        assertTrue(petByName != null);
+        assertTrue(petByName2 != null);
         assertTrue(petByName2 instanceof Cat);
         Pet petByType3 = poorMansIocContext.getBeanByType(Cat.class);
         assertTrue(petByType3 != null);
