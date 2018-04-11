@@ -16,7 +16,7 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
 @Documented
 public @interface Qualifier {
     /**
-     * The name of the
+     * The name of the bean
      */
     String value() default "";
 }

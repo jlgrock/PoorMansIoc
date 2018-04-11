@@ -5,8 +5,12 @@ package com.github.jlgrock.poormansioc;
  */
 public class PoorMansIoc {
 
-    public static PoorMansIocContext poorMansIocContext = new PoorMansIocContext();
+    private static PoorMansIocContext poorMansIocContext = new PoorMansIocContext();
 
+    /**
+     * A simple factory to create a singleton context.
+     * @return the context created
+     */
     public static PoorMansIocContext getContext() {
         return poorMansIocContext;
     }
