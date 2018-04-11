@@ -11,32 +11,21 @@ import static org.junit.Assert.assertTrue;
 
 public class PoorMansIocContextTest {
 
-    public interface Animal {
+    public interface Animal {}
 
-    }
+    public interface Feline extends Animal {}
 
-    public interface Feline extends Animal {
+    public interface Canine extends Animal {}
 
-    }
+    public interface Pet {}
 
-    public interface Canine extends Animal {
+    public static class Cat implements Feline, Pet {}
 
-    }
+    public static class Dog implements Canine, Pet {}
 
-    public interface Pet {
-
-    }
-
-    public static class Cat implements Feline, Pet {
-
-    }
-
-    public static class Dog implements Canine, Pet {
-
-    }
+    public static class Bird implements Pet {}
 
     public static class CatHouse {
-
         public Pet myPet() {
             return new Cat();
         }
@@ -47,6 +36,43 @@ public class PoorMansIocContextTest {
             return new Dog();
         }
     }
+
+    public static class BirdHouse {
+        public Bird myBestFriend() {
+            return new Bird();
+        }
+    }
+
+    public static interface Yard {}
+
+    public static class CatYard implements Yard {}
+
+    public static class DogYard implements Yard {}
+
+    public static class AnimalYard {
+        public Yard yardArea(final Pet animal) {
+            Yard returnVal = null;
+            if (animal instanceof Dog) {
+                returnVal = new DogYard();
+            } else if (animal instanceof Cat) {
+                returnVal = new CatYard();
+            }
+            return returnVal;
+        }
+    }
+
+    public static class QualifiedAnimalYard {
+        public Yard yardArea(@Qualifier("myBestFriend") final Pet animal) {
+            Yard returnVal = null;
+            if (animal instanceof Dog) {
+                returnVal = new DogYard();
+            } else if (animal instanceof Cat) {
+                returnVal = new CatYard();
+            }
+            return returnVal;
+        }
+    }
+
 
     private PoorMansIocContext poorMansIocContext;
 
@@ -128,14 +154,72 @@ public class PoorMansIocContextTest {
 
     @Test
     public void testMultipleInterfaceMatchWithQualifier() {
-        poorMansIocContext.addBean(new DogHouse().myBestFriend(), "myBestFriend", "myQual");
+        poorMansIocContext.addBean(new DogHouse().myBestFriend(), "myBestFriend");
         poorMansIocContext.addBean(new CatHouse().myPet(), "myPet");
 
         List<Pet> pets = poorMansIocContext.getAllBeansByType(Pet.class);
         assertThat(pets.size(), equalTo(2));
 
-        Pet pet = poorMansIocContext.getBeanByType(Pet.class, "myQual");
+        Pet pet = poorMansIocContext.getBeanByType(Pet.class, "myBestFriend");
         assertTrue(pet instanceof Dog);
+    }
+
+    @Test
+    public void testMatchSimpleInjection() {
+        poorMansIocContext.addConfigurationClass(DogHouse.class);
+        poorMansIocContext.addConfigurationClass(AnimalYard.class);
+
+        List<Yard> yards = poorMansIocContext.getAllBeansByType(Yard.class);
+        assertThat(yards.size(), equalTo(1));
+        assertTrue(yards.get(0) instanceof DogYard);
+    }
+
+    @Test
+    public void testMatchSimpleInjectionQualificationMatch() {
+        poorMansIocContext.addConfigurationClass(DogHouse.class);
+        poorMansIocContext.addConfigurationClass(AnimalYard.class);
+
+        Yard yard = poorMansIocContext.getBeanByType(Yard.class, "yardArea");
+        assertTrue(yard instanceof DogYard);
+    }
+
+    @Test
+    public void testMultipleMatchInjectionFailure() {
+        poorMansIocContext.addConfigurationClass(DogHouse.class);
+        poorMansIocContext.addConfigurationClass(CatHouse.class);
+        try {
+            poorMansIocContext.addConfigurationClass(AnimalYard.class);
+            assert(false); // should throw exception
+        } catch(Exception e) {
+            assertTrue(e instanceof PoorMansIocRuntimeException);
+            String expectedString = "Multiple matches found for class `com.github.jlgrock.poormansioc.PoorMansIocContextTest$Pet`" +
+                    "[ class: com.github.jlgrock.poormansioc.PoorMansIocContextTest$Dog], " +
+                    "[ class: com.github.jlgrock.poormansioc.PoorMansIocContextTest$Cat]";
+            assertThat(e.getMessage(), equalTo(expectedString));
+        }
+    }
+
+    @Test
+    public void testMultipleMatchInjectionWithQualifier() {
+        poorMansIocContext.addConfigurationClass(DogHouse.class);
+        poorMansIocContext.addConfigurationClass(CatHouse.class);
+        poorMansIocContext.addConfigurationClass(QualifiedAnimalYard.class);
+        Yard yard = poorMansIocContext.getBeanByType(Yard.class, "yardArea");
+        assertTrue(yard instanceof DogYard);
+    }
+
+    @Test
+    public void testMultipleNamesAdded() {
+        poorMansIocContext.addConfigurationClass(DogHouse.class);
+
+        try{
+            poorMansIocContext.addConfigurationClass(BirdHouse.class);
+        } catch(Exception e) {
+            assertTrue(e instanceof PoorMansIocRuntimeException);
+            String expectedString = "Class with name `myBestFriend` already exists";
+            assertThat(e.getMessage(), equalTo(expectedString));
+        }
+
     }
 
 }

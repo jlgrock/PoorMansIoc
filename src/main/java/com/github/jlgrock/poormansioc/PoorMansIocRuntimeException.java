@@ -1,7 +1,7 @@
 package com.github.jlgrock.poormansioc;
 
 /**
- *
+ * A runtime exception that should occur if you are unable to load a bean for whatever reason.
  */
 public class PoorMansIocRuntimeException extends RuntimeException {
     /**

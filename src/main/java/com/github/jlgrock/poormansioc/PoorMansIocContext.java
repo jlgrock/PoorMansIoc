@@ -1,8 +1,6 @@
 package com.github.jlgrock.poormansioc;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
+import java.lang.annotation.Annotation;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -14,55 +12,62 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- *
+ * A VERY simple implementation of an IoC context library.  This pales in comparison to Guice/Spring/CDI, but it is a
+ * better than nothing and totally free for use in an environment that doesn't allow for either library (for some
+ * stupid reason)
  */
 public class PoorMansIocContext {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(PoorMansIocContext.class);
-
-    private Map<String, List<QualifiedObject>> mapByName = new HashMap<>();
-    private Map<Class<?>, List<QualifiedObject>> mapByClass = new HashMap<>();
+    private Map<String, Object> mapByName = new HashMap<>();
+    private Map<Class<?>, List<NamedObject>> mapByClass = new HashMap<>();
 
     /**
      * Will add a configuration class.  how this works is that it will cycle through all of the methods and add
-     * their objects to the context.  This assumes a no-argument constructor.
+     * their objects to the context.  This assumes a no-argument constructor.  Unlike fancy IoC frameworks, this
+     * doesn't build out a dependency tree - so make sure that your beans are in order.  Also, it will add EVERY
+     * method of a class, so make sure to keep your processing out of you bean configuration classes.
      */
     public void addConfigurationClass(final Class clazz) {
         Object configObject = instantiateConfigClass(clazz);
-        addBean(configObject, clazz.getName());
+        addBean(configObject, clazz.getSimpleName());
         addConfigurationMethodBeans(clazz, configObject);
     }
 
+    /**
+     * Add an individual Bean to the contexxt
+     * @param instance the instance to add
+     * @param name the name of the bean to add
+     */
     public void addBean(final Object instance, final String name) {
-        addBean(instance, name, null);
-    }
-
-    public void addBean(final Object instance, final String name, final String qualifier) {
-        addMapByName(instance, name, qualifier);
-        addMapByClass(instance.getClass(), instance, qualifier);
+        addMapByName(instance, name);
+        addMapByClass(instance.getClass(), instance, name);
         for (Class classInterface : instance.getClass().getInterfaces()) {
-            addMapByClass(classInterface, instance, qualifier);
+            addMapByClass(classInterface, instance, name);
         }
     }
 
-    private void addMapByName(final Object instance, final String name, final String qualifier) {
-        List<QualifiedObject> objects = addObjectToMapList(mapByName.get(name), instance, qualifier);
-        mapByName.put(name, objects);
+    private void addMapByName(final Object instance, final String name) {
+        Object object = mapByName.get(name);
+        if (object != null) {
+            throw new PoorMansIocRuntimeException("Class with name `" + name + "` already exists");
+        }
+        mapByName.put(name, instance);
     }
 
-    private List<QualifiedObject> addObjectToMapList(final List<QualifiedObject> objects, final Object instance, final String qualifier) {
-        List<QualifiedObject> newObjects = new ArrayList<>();
+    private void addMapByClass(final Class clazz, final Object instance, final String name) {
+        List<NamedObject> objects = addObjectToMapList(mapByClass.get(clazz), instance, name);
+        mapByClass.put(clazz, objects);
+    }
+
+    private List<NamedObject> addObjectToMapList(final List<NamedObject> objects,
+                                                 final Object instance,
+                                                 final String name) {
+        List<NamedObject> newObjects = new ArrayList<>();
         if (objects != null) {
             newObjects.addAll(objects);
         }
-        QualifiedObject qualifiedObject = new QualifiedObject(instance, qualifier);
-        newObjects.add(qualifiedObject);
+        NamedObject namedObject = new NamedObject(instance, name);
+        newObjects.add(namedObject);
         return newObjects;
-    }
-
-    private void addMapByClass(final Class clazz, final Object instance, final String qualifier) {
-        List<QualifiedObject> objects = addObjectToMapList(mapByClass.get(clazz), instance, qualifier);
-        mapByClass.put(clazz, objects);
     }
 
     private Object instantiateConfigClass(final Class clazz) {
@@ -87,9 +92,7 @@ public class PoorMansIocContext {
                 Object[] params = createListOfParameters(method).toArray();
                 try {
                     beanObject = method.invoke(configObject, params);
-                } catch (IllegalAccessException e) {
-                    throw new PoorMansIocRuntimeException("Unable to access method `" + method.getName() + "` on object `" + clazz.getName() + "`", e);
-                } catch (InvocationTargetException e) {
+                } catch (IllegalAccessException | InvocationTargetException e) {
                     throw new PoorMansIocRuntimeException("Unable to access method `" + method.getName() + "` on object `" + clazz.getName() + "`", e);
                 }
                 addBean(beanObject, method.getName());
@@ -102,66 +105,94 @@ public class PoorMansIocContext {
         Parameter[] parameters = method.getParameters();
 
         for (Parameter parameter : parameters) {
-            list.add(getBeanByType(parameter.getType()));
+            list.add(getBeanByType(parameter.getType(), determineQualificationName(parameter)));
         }
         return list;
     }
 
-    public <T> T getBeanByName(final String name) {
-        List<QualifiedObject> list = mapByName.get(name);
-        if (list.size() > 1) {
-            LOGGER.error("Unable to match on name `" + name + ".");
-            printMatches(list);
-        }
-        return (T) list.get(0).getObject();
-    }
-
-    public <T> T getAllBeansByName(final String name) {
-        List<QualifiedObject> list = mapByName.get(name);
-        return createUniqueList(list);
-    }
-
-    private void printMatches(final List<QualifiedObject> list) {
-        String objectsFound = list.stream()
-                .map(qualifiedObject -> "[ class: " + qualifiedObject.getObject().getClass().getName() + ", qualifier: " + qualifiedObject.getQualifier() + "]")
-                .collect(Collectors.joining(", "));
-
-        throw new PoorMansIocRuntimeException("Matches found: " + objectsFound);
-    }
-
-    private List<QualifiedObject> filterByQualifier(final List<QualifiedObject> list, final String qualifier) {
-        List<QualifiedObject> returnVal;
-        if (qualifier == null) {
-            returnVal = list;
-        } else {
-            returnVal = list.stream().filter(qualifiedObject -> qualifier.equals(qualifiedObject.getQualifier())).collect(Collectors.toList());
+    /**
+     * @return null if none has been found or it is a blank string, otherwise the name for use in the qualification
+     */
+    private String determineQualificationName(final Parameter parameter) {
+        String returnVal = null;
+        for (Annotation annotation : parameter.getAnnotations()) {
+            if (annotation instanceof Qualifier) {
+               returnVal = ((Qualifier) annotation).value();
+               break;
+            }
         }
         return returnVal;
     }
 
+    /**
+     * Get an individual bean by its name.  This is guaranteed to be unique.
+     * @param name the bean to get
+     * @param <T> the type to return
+     * @return the registered bean that you have retrieved from the context
+     */
+    public <T> T getBeanByName(final String name) {
+        return (T) mapByName.get(name);
+    }
+
+    private List<NamedObject> filterByQualifier(final List<NamedObject> list, final String qualifier) {
+        List<NamedObject> returnVal;
+        if (qualifier == null) {
+            returnVal = list;
+        } else {
+            returnVal = list.stream().filter(namedObject -> qualifier.equals(namedObject.getName())).collect(Collectors.toList());
+        }
+        return returnVal;
+    }
+
+    /**
+     * Get a bean based off of its type
+     * @param clazz the class to search the context for - this will search heirarchies and interfaces as well.
+     * @param <T> the type of object to return
+     * @return the registered bean that you have retrieved from the context
+     */
     public <T> T getBeanByType(final Class clazz) {
         return getBeanByType(clazz, null);
     }
 
+    /**
+     * Get a bean based off of its type
+     * @param clazz the class to search the context for - this will search heirarchies and interfaces as well.
+     * @param qualifier the name of the bean, in the case of multiple objects of the same type being registered
+     * @param <T> the type of object to return
+     * @return the registered bean that you have retrieved from the context
+     */
     public <T> T getBeanByType(final Class clazz, final String qualifier) {
-        List<QualifiedObject> list = mapByClass.get(clazz);
-        List<QualifiedObject> filteredList = filterByQualifier(list, qualifier);
-        if (filteredList == null) {
-            throw new PoorMansIocRuntimeException("Unable to match on class `" + clazz + ".");
-        } else if (filteredList.size() != 1) {
-            LOGGER.error("Multiple matches found on class `" + clazz + ".");
-            printMatches(filteredList);
-            throw new PoorMansIocRuntimeException("Unable to match on class `" + clazz + ".");
+        List<NamedObject> list = mapByClass.get(clazz);
+        List<NamedObject> filteredList = filterByQualifier(list, qualifier);
+        if (filteredList == null || filteredList.size() == 0) {
+            if (qualifier == null || "".equals(qualifier)) {
+                throw new PoorMansIocRuntimeException("Unable to match on class `" + clazz + "`.");
+            } else {
+                throw new PoorMansIocRuntimeException("Unable to match on class `" + clazz + "` with qualifier `" + qualifier + "`.");
+            }
+        } else if (filteredList.size() > 1) {
+            String errStr = "Multiple matches found for class `" + clazz.getName() + "`";
+            String objectsFound = list.stream()
+                    .map(namedObject -> "[ class: " + namedObject.getObject().getClass().getName() + "]")
+                    .collect(Collectors.joining(", "));
+            errStr += objectsFound;
+            throw new PoorMansIocRuntimeException(errStr);
         }
         return (T) filteredList.get(0).getObject();
     }
 
+    /**
+     * Will retrieve all of the beans
+     * @param clazz
+     * @param <T>
+     * @return
+     */
     public <T> T getAllBeansByType(final Class clazz) {
-        List<QualifiedObject> list = mapByClass.get(clazz);
+        List<NamedObject> list = mapByClass.get(clazz);
         return createUniqueList(list);
     }
 
-    private <T> T createUniqueList(final List<QualifiedObject> list) {
+    private <T> T createUniqueList(final List<NamedObject> list) {
         return (T) list
                 .stream()
                 .map(item -> item.getObject())
@@ -169,7 +200,9 @@ public class PoorMansIocContext {
                 .collect(Collectors.toList());
     }
 
-
+    /**
+     * Will clear the context.  This is useful when testing, as this doesn't have fancy JUnit runners
+     */
     public void clear() {
         mapByName = new HashMap<>();
         mapByClass = new HashMap<>();
